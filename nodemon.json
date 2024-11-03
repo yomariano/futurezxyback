@@ -1,6 +1,0 @@
-{
-  "watch": ["*.js"],
-  "ignore": ["node_modules"],
-  "exec": "node websocket_client.js",
-  "ext": "js,json"
-}
