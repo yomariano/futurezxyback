@@ -1,0 +1,19 @@
+{
+  "name": "mexc-wavetrend-bot",
+  "version": "1.0.0",
+  "description": "MEXC WebSocket bot with Wave Trend indicator",
+  "main": "websocket_client.js",
+  "scripts": {
+    "start": "node websocket_client.js",
+    "dev": "nodemon websocket_client.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.7",
+    "bignumber.js": "^9.1.2",
+    "technicalindicators": "^3.1.0",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
+  }
+}
