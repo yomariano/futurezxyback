@@ -7,11 +7,13 @@ import indicators
 
 # Configuration
 SYMBOLS = ['INJ_USDT']
-TIMEFRAMES = ['1m', '5m', '15m']
+TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h']
 CANDLE_INTERVALS = {
     '1m': 'Min1',
     '5m': 'Min5',
-    '15m': 'Min15'
+    '15m': 'Min15',
+    '1h': 'Min60',
+    '4h': 'Hour4'
 }
 
 # Data structure to store candles
@@ -30,11 +32,23 @@ for symbol in SYMBOLS:
         candle_store[symbol][timeframe] = []
 
 async def fetch_historical_candles(symbol, timeframe):
-    api_symbol = symbol  # Keep INJ_USDT as is
+    api_symbol = symbol
     now = int(time.time())
-    five_hours_ago = now - (5 * 60 * 60)
     
-    url = f"https://contract.mexc.com/api/v1/contract/kline/{api_symbol}?interval=Min1&start={five_hours_ago}&end={now}"
+    # Adjust the lookback period based on timeframe
+    hours_lookback = {
+        '1m': 5,    # 5 hours = 300 candles for 1m
+        '5m': 24,   # 24 hours = 288 candles for 5m
+        '15m': 48,  # 48 hours = 192 candles for 15m
+        '1h': 168,  # 7 days = 168 candles for 1h
+        '4h': 480   # 20 days = 120 candles for 4h
+    }
+    
+    period = hours_lookback[timeframe] * 60 * 60  # Convert hours to seconds
+    start_time = now - period
+    
+    interval = CANDLE_INTERVALS[timeframe]
+    url = f"https://contract.mexc.com/api/v1/contract/kline/{api_symbol}?interval={interval}&start={start_time}&end={now}"
     
     try:
         print('Query:', url)
@@ -151,14 +165,30 @@ def update_candles(ticker_data):
             # Get the current candle list
             candles = candle_store[symbol][timeframe]
             
-            # Calculate the candle start time (floor to the nearest interval)
-            interval_seconds = int(timeframe[:-1]) * 60  # Convert '1m' to 60 seconds, '5m' to 300 seconds, etc.
-            candle_start = (timestamp // (interval_seconds * 1000)) * (interval_seconds * 1000)
+            # Convert timestamp to datetime for easier manipulation
+            dt = datetime.fromtimestamp(timestamp / 1000)
             
-            if not candles or candles[0]['timestamp'] < candle_start:
+            # Align timestamp to the correct interval
+            if timeframe == '1h':
+                # Round down to the nearest hour
+                aligned_dt = dt.replace(minute=0, second=0, microsecond=0)
+            elif timeframe == '4h':
+                # Round down to the nearest 4-hour interval
+                hour = (dt.hour // 4) * 4
+                aligned_dt = dt.replace(hour=hour, minute=0, second=0, microsecond=0)
+            else:
+                aligned_dt = dt
+            
+            # Convert back to milliseconds timestamp
+            aligned_timestamp = int(aligned_dt.timestamp() * 1000)
+            
+            # Update the candle data with aligned timestamp
+            timestamp = aligned_timestamp
+            
+            if not candles or candles[0]['timestamp'] < timestamp:
                 # Create a new candle
                 new_candle = {
-                    'timestamp': candle_start,
+                    'timestamp': timestamp,
                     'open': close_price,
                     'high': close_price,
                     'low': close_price,
@@ -203,23 +233,6 @@ def calculate_indicators(symbol, timeframe):
         if candles:
             candles[0]['wt1'] = wt_results['wt1']
             candles[0]['wt2'] = wt_results['wt2']
-            candles[0]['overbought1'] = wt_results['overbought1']
-            candles[0]['overbought2'] = wt_results['overbought2']
-            candles[0]['oversold1'] = wt_results['oversold1']
-            candles[0]['oversold2'] = wt_results['oversold2']
-            candles[0]['cross_over'] = wt_results['cross_over']
-            candles[0]['cross_under'] = wt_results['cross_under']
-            
-            # Print signal conditions
-            if wt_results['cross_over']:
-                print(f"\n🔵 BULLISH SIGNAL: WaveTrend Cross Over for {symbol} {timeframe}")
-            elif wt_results['cross_under']:
-                print(f"\n🔴 BEARISH SIGNAL: WaveTrend Cross Under for {symbol} {timeframe}")
-            
-            if wt_results['overbought1']:
-                print(f"⚠️ OVERBOUGHT Level 1: {symbol} {timeframe}")
-            elif wt_results['oversold1']:
-                print(f"⚠️ OVERSOLD Level 1: {symbol} {timeframe}")
         
     except Exception as error:
         print(f"Error calculating WaveTrend indicators: {error}")

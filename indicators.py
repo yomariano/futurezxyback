@@ -17,8 +17,11 @@ class Indicators:
         if len(candles) < max(self.n1, self.n2, 4):
             raise ValueError(f"Not enough candles to calculate Wave Trend. Need at least {max(self.n1, self.n2, 4)} candles, but got {len(candles)}")
 
-        # Convert candles to pandas DataFrame and reverse order (oldest first)
-        df = pd.DataFrame(candles[::-1])
+        # Sort candles by timestamp in descending order (newest first)
+        sorted_candles = sorted(candles, key=lambda x: x['timestamp'], reverse=True)
+        
+        # Convert sorted candles to pandas DataFrame and reverse order (oldest first)
+        df = pd.DataFrame(sorted_candles[::-1])
         
         # Calculate AP (HLC3)
         df['ap'] = (df['high'] + df['low'] + df['close']) / 3
@@ -52,15 +55,15 @@ class Indicators:
             wt2_value = df.iloc[i]['wt2']
             wt2_str = f"{wt2_value:.6f}" if not pd.isna(wt2_value) else "N/A"
             
-            # print(f"Time: {timestamp} "
-            #       f"H: {df.iloc[i]['high']:.6f} "
-            #       f"L: {df.iloc[i]['low']:.6f} "
-            #       f"C: {df.iloc[i]['close']:.6f} "
-            #       f"AP: {df.iloc[i]['ap']:.6f} "
-            #       f"EMA: {df.iloc[i]['esa']:.6f} "
-            #       f"D: {df.iloc[i]['d']:.6f} "
-            #       f"WT1: {df.iloc[i]['wt1']:.6f} "
-            #       f"WT2: {wt2_str}")
+            print(f"Time: {timestamp} "
+                  f"H: {df.iloc[i]['high']:.6f} "
+                  f"L: {df.iloc[i]['low']:.6f} "
+                  f"C: {df.iloc[i]['close']:.6f} "
+                  f"AP: {df.iloc[i]['ap']:.6f} "
+                  f"EMA: {df.iloc[i]['esa']:.6f} "
+                  f"D: {df.iloc[i]['d']:.6f} "
+                  f"WT1: {df.iloc[i]['wt1']:.6f} "
+                  f"WT2: {wt2_str}")
 
         # Get current values
         current = df.iloc[0]
