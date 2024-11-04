@@ -7,6 +7,11 @@ import sys
 import time
 from datetime import datetime
 from typing import Dict, Any
+import json
+import random
+
+# Import the websocket_server module
+import websocket_server
 
 # Configure logging
 logging.basicConfig(
@@ -44,6 +49,20 @@ class TradingBot:
             logger.info(f"\nWave Trend Analysis for {symbol} {timeframe}:")
             logger.info(f"WT1: {wt['wt1']:.2f}")
             logger.info(f"WT2: {wt['wt2']:.2f}")
+            
+            # Broadcast the WT1 and WT2 values
+            try:
+                message = json.dumps({
+                    'symbol': symbol,
+                    'timeframe': timeframe,
+                    'wt1': round(wt['wt1'], 2),
+                    'wt2': round(wt['wt2'], 2),
+                    'timestamp': datetime.now().isoformat()
+                })
+                logger.info(f"Preparing to broadcast: {message}")
+                await websocket_server.broadcast(message)
+            except Exception as broadcast_error:
+                logger.error(f"Error broadcasting message: {broadcast_error}")
             
             # Log trading signals
             if wt['cross_over']:
@@ -109,6 +128,18 @@ class TradingBot:
         """Initialize the trading bot"""
         logger.info("Initializing Trading Bot...")
         
+        # Send a test message
+        test_message = json.dumps({
+            'symbol': 'TEST',
+            'timeframe': '1m',
+            'wt1': 0.00,
+            'wt2': 0.00,
+            'timestamp': datetime.now().isoformat(),
+            'type': 'test_message'
+        })
+        logger.info("Sending test broadcast message")
+        await websocket_server.broadcast(test_message)
+        
         # Fetch historical data
         logger.info("Fetching historical data...")
         for symbol in websocket_client.SYMBOLS:
@@ -125,6 +156,45 @@ class TradingBot:
         is_running = False
         self.stop_event.set()
 
+    async def periodic_test_broadcast(self) -> None:
+        """Send periodic Wave Trend calculations for all symbols and timeframes"""
+        while is_running and not self.stop_event.is_set():
+            try:
+                # Iterate through all symbols and timeframes
+                for symbol in websocket_client.SYMBOLS:
+                    for timeframe in websocket_client.TIMEFRAMES:
+                        # Get the latest candle data
+                        candles = websocket_client.candle_store[symbol][timeframe]
+                        if candles:
+                            latest_candle = candles[0]  # Get the most recent candle
+                            
+                            # Create message with actual Wave Trend values
+                            message = json.dumps({
+                                'type': 'wavetrend',  # Added indicator type
+                                'symbol': symbol,
+                                'timeframe': timeframe,
+                                'wt1': round(latest_candle.get('wt1', 0), 2),
+                                'wt2': round(latest_candle.get('wt2', 0), 2),
+                                'timestamp': datetime.now().isoformat(),
+                                'price': latest_candle.get('close', 0),
+                                'signals': {  # Optional: Including signal information
+                                    'cross_over': latest_candle.get('cross_over', False),
+                                    'cross_under': latest_candle.get('cross_under', False),
+                                    'overbought': latest_candle.get('overbought', False),
+                                    'oversold': latest_candle.get('oversold', False)
+                                }
+                            })
+                            
+                            # logger.info(f"Broadcasting Wave Trend for {symbol} {timeframe}")
+                            await websocket_server.broadcast(message)
+                
+                # Wait before next broadcast cycle
+                await asyncio.sleep(1)  # Adjust this value based on your needs
+                
+            except Exception as e:
+                logger.error(f"Error in Wave Trend broadcast: {str(e)}")
+                await asyncio.sleep(5)
+
 def signal_handler(signum, frame):
     """Handle shutdown signals"""
     global is_running
@@ -137,6 +207,9 @@ async def main():
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
         
+        # Start WebSocket server
+        websocket_server_task = asyncio.create_task(websocket_server.start_server())
+        
         # Create and initialize trading bot
         bot = TradingBot()
         await bot.initialize()
@@ -147,13 +220,16 @@ async def main():
             asyncio.to_thread(websocket_client.initialize_websocket)
         )
         
-        # Start periodic calculations
+        # Start periodic calculations and test broadcasts
         calculation_task = asyncio.create_task(bot.periodic_calculation())
+        test_broadcast_task = asyncio.create_task(bot.periodic_test_broadcast())
         
         # Wait for tasks to complete
         await asyncio.gather(
+            websocket_server_task,
             websocket_task,
             calculation_task,
+            test_broadcast_task,
             return_exceptions=True
         )
         

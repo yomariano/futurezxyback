@@ -169,26 +169,32 @@ def update_candles(ticker_data):
             dt = datetime.fromtimestamp(timestamp / 1000)
             
             # Align timestamp to the correct interval
-            if timeframe == '1h':
+            if timeframe == '1m':
+                # Round down to the nearest minute
+                aligned_dt = dt.replace(second=0, microsecond=0)
+            elif timeframe == '5m':
+                # Round down to the nearest 5 minutes
+                minutes = (dt.minute // 5) * 5
+                aligned_dt = dt.replace(minute=minutes, second=0, microsecond=0)
+            elif timeframe == '15m':
+                # Round down to the nearest 15 minutes
+                minutes = (dt.minute // 15) * 15
+                aligned_dt = dt.replace(minute=minutes, second=0, microsecond=0)
+            elif timeframe == '1h':
                 # Round down to the nearest hour
                 aligned_dt = dt.replace(minute=0, second=0, microsecond=0)
             elif timeframe == '4h':
                 # Round down to the nearest 4-hour interval
                 hour = (dt.hour // 4) * 4
                 aligned_dt = dt.replace(hour=hour, minute=0, second=0, microsecond=0)
-            else:
-                aligned_dt = dt
             
             # Convert back to milliseconds timestamp
             aligned_timestamp = int(aligned_dt.timestamp() * 1000)
             
-            # Update the candle data with aligned timestamp
-            timestamp = aligned_timestamp
-            
-            if not candles or candles[0]['timestamp'] < timestamp:
+            if not candles or candles[0]['timestamp'] < aligned_timestamp:
                 # Create a new candle
                 new_candle = {
-                    'timestamp': timestamp,
+                    'timestamp': aligned_timestamp,
                     'open': close_price,
                     'high': close_price,
                     'low': close_price,
@@ -225,9 +231,9 @@ def calculate_indicators(symbol, timeframe):
         wt_results = indicators.indicators.calculate_wave_trend(candles)
         
         # Debug print
-        print(f"\nWaveTrend Results for {symbol} {timeframe}:")
-        print(f"WT1: {wt_results['wt1']:.2f}")
-        print(f"WT2: {wt_results['wt2']:.2f}")
+        # print(f"\nWaveTrend Results for {symbol} {timeframe}:")
+        # print(f"WT1: {wt_results['wt1']:.2f}")
+        # print(f"WT2: {wt_results['wt2']:.2f}")
         
         # Store results in the latest candle
         if candles:
