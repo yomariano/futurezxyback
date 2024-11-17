@@ -7,7 +7,64 @@ import indicators
 import asyncio
 import websocket_server
 # Configuration
-SYMBOLS = ['INJ_USDT']
+SYMBOLS = [
+'INJ_USDT'
+'BTC_USDT',
+'ETH_USDT',
+'SOL_USDT',
+'XRP_USDT',
+'ADA_USDT',
+'DOT_USDT',
+'AVAX_USDT',
+'DOGE_USDT',
+'LTC_USDT',
+'LINK_USDT',
+'UNI_USDT',
+'BCH_USDT',
+'EOS_USDT',
+'XLM_USDT',
+'TRX_USDT',
+'ETC_USDT',
+ 'WLD_USDT',
+'JASMY_USDT',
+'POPCAT_USDT',
+ 'HOT_USDT',
+'PEPE_USDT',
+'TOKEN_USDT',
+ 'TURBO_USDT',
+'RARE_USDT',
+'CRV_USDT',
+'RENDER_USDT',
+'TAO_USDT',
+'ZEC_USDT',
+'CAT_USDT',
+'CLOUD_USDT',
+"VELO_USDT",
+"LUNA_USDT",
+"TON_USDT",
+"PORTAL_USDT",
+"NOT_USDT",
+"MBL_USDT",
+"CHZ_USDT",
+"XLM_USDT",
+"VANRY_USDT",
+"RUNE_USDT",
+"MEW_USDT",
+"MKR_USDT",
+"SOL_USDT",
+"FET_USDT",
+"HOOK_USDT",
+"XAI_USDT",
+"WIF_USDT",
+"OP_USDT",
+"TIA_USDT",
+"ENA_USDT",
+"WOO_USDT",
+"GALA_USDT",
+"WUSDT",
+ "EGLD_USDT"
+]
+
 TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h']
 CANDLE_INTERVALS = {
     '1m': 'Min1',
@@ -253,28 +310,35 @@ def calculate_indicators(symbol, timeframe):
         # Get candles for the symbol and timeframe
         candles = candle_store[symbol][timeframe]
         
-        # Calculate WaveTrend using the existing method
+        # Calculate WaveTrend
         wt_results = indicators.indicators.calculate_wave_trend(candles)
+        
+        # Calculate RSI
+        rsi_value = indicators.indicators.calculate_rsi(candles)
         
         # Store results in the latest candle
         if candles:
             candles[0]['wt1'] = wt_results['wt1']
             candles[0]['wt2'] = wt_results['wt2']
+            candles[0]['rsi'] = float(rsi_value.iloc[-1]) if not rsi_value.empty else None
             
-            # Create and broadcast message
-            message = {
+            # Create and broadcast WaveTrend message
+            signals = {
+                'type': 'indicators',
                 'symbol': symbol,
                 'timeframe': timeframe,
                 'wt1': round(wt_results['wt1'], 2),
                 'wt2': round(wt_results['wt2'], 2),
+                'rsi': round(float(rsi_value.iloc[-1]), 2) if not rsi_value.empty else None,
+                'price': round(float(candles[0]['close']), 4),  # Add current price from latest candle
                 'timestamp': datetime.now().isoformat()
             }
             
-            # Use asyncio to run the broadcast
-            asyncio.run(websocket_server.broadcast(json.dumps(message)))
+            # Broadcast both messages separately
+            asyncio.run(websocket_server.broadcast(json.dumps(signals)))
         
     except Exception as error:
-        print(f"Error calculating WaveTrend indicators: {error}")
+        print(f"Error calculating indicators: {error}")
 
 # Main execution
 if __name__ == "__main__":
