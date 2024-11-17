@@ -39,10 +39,8 @@ class TradingBot:
     async def calculate_and_log_indicators(self, symbol: str, timeframe: str) -> None:
         """Calculate and log indicators for a specific symbol and timeframe"""
         try:
-            wt = indicators.calculate_wave_trend_for_symbol(
-                websocket_client.candle_store, 
-                symbol, 
-                timeframe
+            wt = indicators.calculate_wave_trend(
+                websocket_client.candle_store[symbol][timeframe]
             )
             
             # Log the Wave Trend signals
@@ -115,14 +113,16 @@ class TradingBot:
     @staticmethod
     def timeframe_to_seconds(timeframe: str) -> int:
         """Convert timeframe string to seconds"""
-        if timeframe == '1m':
-            return 60
-        elif timeframe == '5m':
-            return 300
-        elif timeframe == '15m':
-            return 900
-        else:
-            return 60  # Default to 1 minute
+        timeframe_map = {
+            '1m': 60,
+            '5m': 300,
+            '15m': 900,
+            '1h': 3600,
+            '4h': 14400,
+            '1d': 86400,
+            '1w': 604800
+        }
+        return timeframe_map.get(timeframe, 60)  # Default to 1 minute if timeframe not found
 
     async def initialize(self) -> None:
         """Initialize the trading bot"""
@@ -160,39 +160,67 @@ class TradingBot:
         """Send periodic Wave Trend calculations for all symbols and timeframes"""
         while is_running and not self.stop_event.is_set():
             try:
-                # Iterate through all symbols and timeframes
                 for symbol in websocket_client.SYMBOLS:
+                    logger.info(f"\nChecking data for symbol: {symbol}")
                     for timeframe in websocket_client.TIMEFRAMES:
-                        # Get the latest candle data
                         candles = websocket_client.candle_store[symbol][timeframe]
+                        logger.info(f"Timeframe {timeframe}: {len(candles)} candles available")
+                        
                         if candles:
-                            latest_candle = candles[0]  # Get the most recent candle
+                            latest_candle = candles[0]
                             
-                            # Create message with actual Wave Trend values
-                            message = json.dumps({
-                                'type': 'wavetrend',  # Added indicator type
+                            # Create message with all signals
+                            message = {
+                                'type': 'indicators',
                                 'symbol': symbol,
                                 'timeframe': timeframe,
-                                'wt1': round(latest_candle.get('wt1', 0), 2),
-                                'wt2': round(latest_candle.get('wt2', 0), 2),
+                                'wt1': round(latest_candle.get('wt1', 0), 8),
+                                'wt2': round(latest_candle.get('wt2', 0), 8),
+                                'sma50': round(latest_candle.get('sma50', 0), 8),
+                                'sma200': round(latest_candle.get('sma200', 0), 8),
+                                'rsi': round(latest_candle.get('rsi', 0), 2),
                                 'timestamp': datetime.now().isoformat(),
-                                'price': latest_candle.get('close', 0),
-                                'signals': {  # Optional: Including signal information
-                                    'cross_over': latest_candle.get('cross_over', False),
-                                    'cross_under': latest_candle.get('cross_under', False),
-                                    'overbought': latest_candle.get('overbought', False),
-                                    'oversold': latest_candle.get('oversold', False)
+                                'price': round(latest_candle.get('close', 0), 8),
+                                'signals': {
+                                    # Existing signals
+                                    'cross_over': bool(latest_candle.get('cross_over', False)),
+                                    'cross_under': bool(latest_candle.get('cross_under', False)),
+                                    'overbought': bool(latest_candle.get('overbought', False)),
+                                    'oversold': bool(latest_candle.get('oversold', False)),
+                                    'price_above_sma50': bool(latest_candle.get('price_above_sma50', False)),
+                                    'price_above_sma200': bool(latest_candle.get('price_above_sma200', False)),
+                                    'sma50_above_sma200': bool(latest_candle.get('sma50_above_sma200', False)),
+                                    'bullish_divergence': bool(latest_candle.get('bullish_divergence', False)),
+                                    'hidden_bullish_divergence': bool(latest_candle.get('hidden_bullish_divergence', False)),
+                                    'bearish_divergence': bool(latest_candle.get('bearish_divergence', False)),
+                                    'hidden_bearish_divergence': bool(latest_candle.get('hidden_bearish_divergence', False)),
+                                    # New MA touch signals
+                                    'price_touching_sma50_from_above': bool(latest_candle.get('price_touching_sma50_from_above', False)),
+                                    'price_touching_sma50_from_below': bool(latest_candle.get('price_touching_sma50_from_below', False)),
+                                    'price_touching_sma200_from_above': bool(latest_candle.get('price_touching_sma200_from_above', False)),
+                                    'price_touching_sma200_from_below': bool(latest_candle.get('price_touching_sma200_from_below', False)),
+                                    # New 3% margin signals
+                                    'price_near_sma50_from_above': bool(latest_candle.get('price_near_sma50_from_above', False)),
+                                    'price_near_sma50_from_below': bool(latest_candle.get('price_near_sma50_from_below', False)),
+                                    'price_near_sma200_from_above': bool(latest_candle.get('price_near_sma200_from_above', False)),
+                                    'price_near_sma200_from_below': bool(latest_candle.get('price_near_sma200_from_below', False))
+                                },
+                                # Add distance measurements
+                                'distances': {
+                                    'distance_to_sma50': round(latest_candle.get('distance_to_sma50', 0), 2),
+                                    'distance_to_sma200': round(latest_candle.get('distance_to_sma200', 0), 2)
                                 }
-                            })
+                            }
                             
-                            # logger.info(f"Broadcasting Wave Trend for {symbol} {timeframe}")
-                            await websocket_server.broadcast(message)
-                
-                # Wait before next broadcast cycle
-                await asyncio.sleep(1)  # Adjust this value based on your needs
+                            logger.info(f"Broadcasting for {symbol} {timeframe}")
+                            await websocket_server.broadcast(json.dumps(message))
+                        else:
+                            logger.warning(f"No candles available for {symbol} {timeframe}")
+                            
+                await asyncio.sleep(1)
                 
             except Exception as e:
-                logger.error(f"Error in Wave Trend broadcast: {str(e)}")
+                logger.error(f"Error in indicator broadcast: {str(e)}")
                 await asyncio.sleep(5)
 
 def signal_handler(signum, frame):
@@ -207,39 +235,44 @@ async def main():
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
         
-        # Start WebSocket server
-        websocket_server_task = asyncio.create_task(websocket_server.start_server())
+        # Try different ports if the default one is in use
+        server = None
+        ports = [8080, 8081, 8082, 8083]  # List of ports to try
         
+        for port in ports:
+            try:
+                logger.info(f"Starting WebSocket server on port {port}...")
+                server = await websocket_server.start_server(port=port)
+                logger.info(f"WebSocket server successfully started on port {port}")
+                break
+            except OSError as e:
+                if e.errno == 48:  # Address already in use
+                    logger.warning(f"Port {port} is already in use, trying next port...")
+                    continue
+                raise  # Re-raise other OSErrors
+        
+        if server is None:
+            raise RuntimeError("Could not find an available port for the WebSocket server")
+
         # Create and initialize trading bot
         bot = TradingBot()
         await bot.initialize()
         
-        # Start WebSocket connection
-        logger.info("Initializing WebSocket connection...")
-        websocket_task = asyncio.create_task(
-            asyncio.to_thread(websocket_client.initialize_websocket)
-        )
+        # Start all tasks
+        tasks = [
+            asyncio.create_task(bot.periodic_calculation()),
+            asyncio.create_task(bot.periodic_test_broadcast()),
+            asyncio.create_task(
+                asyncio.to_thread(websocket_client.initialize_websocket)
+            )
+        ]
         
-        # Start periodic calculations and test broadcasts
-        calculation_task = asyncio.create_task(bot.periodic_calculation())
-        test_broadcast_task = asyncio.create_task(bot.periodic_test_broadcast())
+        # Wait for tasks to complete or for shutdown
+        await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Wait for tasks to complete
-        await asyncio.gather(
-            websocket_server_task,
-            websocket_task,
-            calculation_task,
-            test_broadcast_task,
-            return_exceptions=True
-        )
-        
-    except KeyboardInterrupt:
-        logger.info("Shutting down gracefully...")
     except Exception as e:
         logger.error(f"An error occurred: {str(e)}")
         raise
-    finally:
-        logger.info("Cleanup complete. Exiting...")
 
 if __name__ == "__main__":
     try:

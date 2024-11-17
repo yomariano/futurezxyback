@@ -1,79 +1,61 @@
 import asyncio
 import websockets
-import json
 import logging
-from datetime import datetime
+import ssl
+import os
+import json
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
+def on_message(ws, message):
+    logger.info(f"Received message: {message}")
+
 async def connect_websocket():
     """Connect to WebSocket server and print received messages"""
-    uri = "ws://localhost:8765"
+    # Determine environment
+    is_prod = os.getenv('ENV') == 'dev'
     
-    try:
-        logger.info(f"Attempting to connect to {uri}")
-        async with websockets.connect(uri) as websocket:
-            logger.info("Successfully connected to WebSocket server")
-            
-            # Keep listening for messages
-            while True:
-                try:
-                    # Wait for message
-                    message = await websocket.recv()
-                    
-                    # Log raw message
-                    logger.info(f"Raw message received: {message}")
-                    
-                    # Try to parse as JSON
-                    try:
-                        data = json.loads(message)
-                        logger.info("Parsed message:")
-                        logger.info(json.dumps(data, indent=2))
-                        
-                        # If it's a Wave Trend message, format it nicely
-                        if all(key in data for key in ['symbol', 'timeframe', 'wt1', 'wt2']):
-                            logger.info(f"""
-Wave Trend Analysis:
-Symbol: {data['symbol']}
-Timeframe: {data['timeframe']}
-WT1: {data['wt1']}
-WT2: {data['wt2']}
-Timestamp: {data.get('timestamp', 'N/A')}
-""")
-                    except json.JSONDecodeError as e:
-                        logger.error(f"Failed to parse message as JSON: {e}")
-                        
-                except websockets.exceptions.ConnectionClosed:
-                    logger.warning("Connection closed by server")
-                    break
-                except Exception as e:
-                    logger.error(f"Error receiving message: {e}")
-                    break
-                    
-    except Exception as e:
-        logger.error(f"Failed to connect to WebSocket server: {e}")
-        return
-
-async def main():
+    # Set URI based on environment
+    if is_prod:
+        uri = "wss://your-trading-bot.fly.dev:443"
+    else:
+        uri = "ws://localhost:8080"  # Match the port your server is running on
+    
     while True:
         try:
-            await connect_websocket()
-        except KeyboardInterrupt:
-            logger.info("Client stopped by user")
-            break
+            logger.info(f"Attempting to connect to {uri}")
+            async with websockets.connect(
+                uri,
+                ping_interval=20,
+                ping_timeout=60,
+                close_timeout=20,
+                max_size=None
+            ) as websocket:
+                websocket.on_message = on_message
+                logger.info("Connected to WebSocket server!")
+                
+                while True:
+                    try:
+                        message = await websocket.recv()
+                        try:
+                            parsed_message = json.loads(message)
+                            logger.info(f"Received message: {json.dumps(parsed_message, indent=2)}")
+                        except json.JSONDecodeError:
+                            logger.info(f"Received raw message: {message}")
+                    except websockets.exceptions.ConnectionClosed:
+                        logger.error("WebSocket connection closed")
+                        break
+                    except Exception as e:
+                        logger.error(f"Error receiving message: {str(e)}")
+                        break
+                    
         except Exception as e:
-            logger.error(f"Error in main loop: {e}")
-        
-        logger.info("Attempting to reconnect in 5 seconds...")
-        await asyncio.sleep(5)
+            logger.error(f"Connection failed: {str(e)}")
+            await asyncio.sleep(5)  # Wait before retrying
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\nClient stopped by user") 
+    asyncio.run(connect_websocket())
