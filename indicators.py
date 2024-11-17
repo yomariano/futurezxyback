@@ -1,8 +1,18 @@
 import numpy as np
 import pandas as pd
 from ta.trend import EMAIndicator
+from ta.momentum import RSIIndicator
+import logging
 from typing import List, Dict, Any
 from datetime import datetime
+import traceback
+
+# Configure logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 class Indicators:
     def __init__(self):
@@ -12,6 +22,40 @@ class Indicators:
         self.ob_level2 = 53   # Overbought Level 2
         self.os_level1 = -60  # Oversold Level 1
         self.os_level2 = -53  # Oversold Level 2
+
+    def calculate_rsi(self, candles, period=14):
+        """Calculate RSI using ta library's RSIIndicator."""
+        try:
+            # Sort candles by timestamp in ascending order (oldest first)
+            sorted_candles = sorted(candles, key=lambda x: x['timestamp'])
+            
+            # Convert to pandas DataFrame and extract close prices
+            df = pd.DataFrame(sorted_candles)
+            
+            # Ensure we have enough data points
+            if len(df) < period + 1:
+                logger.warning(f"Not enough data points for RSI calculation. Need {period + 1}, got {len(df)}")
+                return pd.Series()
+            
+            price_series = pd.Series([float(p) for p in df['close']])
+            
+            # Calculate RSI using ta library
+            rsi_indicator = RSIIndicator(
+                close=price_series,
+                window=period,
+                fillna=True
+            )
+            rsi = rsi_indicator.rsi()
+            
+            # Debug logging
+            logger.debug(f"RSI calculation - Last price: {price_series.iloc[-1]:.2f}, RSI: {rsi.iloc[-1]:.2f}")
+            
+            return rsi
+            
+        except Exception as e:
+            logger.error(f"Error calculating RSI: {str(e)}")
+            logger.error(traceback.format_exc())
+            return pd.Series()
 
     def calculate_wave_trend(self, candles: List[Dict[str, Any]]) -> Dict[str, Any]:
         if len(candles) < max(self.n1, self.n2, 4):
@@ -49,21 +93,21 @@ class Indicators:
         df = df.iloc[::-1]
 
         # Debug logging
-        print('\nLast 10 candles values:')
+        #print('\nLast 10 candles values:')
         for i in range(min(10, len(df))):
             timestamp = datetime.fromtimestamp(df.iloc[i]['timestamp'] / 1000).strftime('%H:%M:%S')
             wt2_value = df.iloc[i]['wt2']
             wt2_str = f"{wt2_value:.6f}" if not pd.isna(wt2_value) else "N/A"
             
-            print(f"Time: {timestamp} "
-                  f"H: {df.iloc[i]['high']:.6f} "
-                  f"L: {df.iloc[i]['low']:.6f} "
-                  f"C: {df.iloc[i]['close']:.6f} "
-                  f"AP: {df.iloc[i]['ap']:.6f} "
-                  f"EMA: {df.iloc[i]['esa']:.6f} "
-                  f"D: {df.iloc[i]['d']:.6f} "
-                  f"WT1: {df.iloc[i]['wt1']:.6f} "
-                  f"WT2: {wt2_str}")
+            # print(f"Time: {timestamp} "
+            #       f"H: {df.iloc[i]['high']:.6f} "
+            #       f"L: {df.iloc[i]['low']:.6f} "
+            #       f"C: {df.iloc[i]['close']:.6f} "
+            #       f"AP: {df.iloc[i]['ap']:.6f} "
+            #       f"EMA: {df.iloc[i]['esa']:.6f} "
+            #       f"D: {df.iloc[i]['d']:.6f} "
+            #       f"WT1: {df.iloc[i]['wt1']:.6f} "
+            #       f"WT2: {wt2_str}")
 
         # Get current values
         current = df.iloc[0]

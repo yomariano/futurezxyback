@@ -4,7 +4,8 @@ import time
 import requests
 from datetime import datetime
 import indicators
-
+import asyncio
+import websocket_server
 # Configuration
 SYMBOLS = ['INJ_USDT']
 TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h']
@@ -51,12 +52,12 @@ async def fetch_historical_candles(symbol, timeframe):
     url = f"https://contract.mexc.com/api/v1/contract/kline/{api_symbol}?interval={interval}&start={start_time}&end={now}"
     
     try:
-        print('Query:', url)
+        #print('Query:', url)
         response = requests.get(url)
         data = response.json()
         
         # Log the raw response structure
-        print('Raw response data:', json.dumps(data, indent=2))
+        #print('Raw response data:', json.dumps(data, indent=2))
         
         # The response has arrays for each field
         time_data = data['data']['time']
@@ -93,21 +94,46 @@ ws = None
 
 def on_message(ws, message):
     try:
-        message = json.loads(message)
+        message_data = json.loads(message)
         
-        if message.get('channel') == "pong":
-            print('Received pong:', message.get('data'))
+        if isinstance(message_data, str):
+            message_data = json.loads(message_data)
+        
+        if message_data.get('channel') == "pong":
+            print('Received pong:', message_data.get('data'))
             return
 
-        if message.get('data') and message['data'].get('lastPrice'):
+        if message_data.get('data') and message_data['data'].get('lastPrice'):
+            # Get the current price and timestamp
+            symbol = message_data.get('symbol')
+            timestamp = message_data['data'].get('timestamp')
+            price = float(message_data['data'].get('lastPrice'))
+            
+            # Update the latest candle with the new price
+            for timeframe in TIMEFRAMES:
+                if symbol in candle_store and timeframe in candle_store[symbol]:
+                    candles = candle_store[symbol][timeframe]
+                    if candles:
+                        candles[0]['close'] = price
+                        candles[0]['high'] = max(candles[0]['high'], price)
+                        candles[0]['low'] = min(candles[0]['low'], price)
+                        
+                        # Calculate and broadcast indicators immediately
+                        calculate_indicators(symbol, timeframe)
+            
+            # Also process regular candle updates
             processed_data = {
-                's': message.get('symbol'),
-                't': message['data'].get('timestamp'),
-                'c': str(message['data'].get('lastPrice'))
+                's': symbol,
+                't': timestamp,
+                'c': str(price)
             }
             update_candles(processed_data)
+            
+    except json.JSONDecodeError as e:
+        print(f'Error decoding JSON message: {e}')
     except Exception as error:
-        print('Error processing message:', error)
+        print(f'Error processing message: {error}')
+        print(f'Raw message: {message}')
 
 def on_error(ws, error):
     print('WebSocket error:', error)
@@ -144,7 +170,7 @@ def on_open(ws):
 
 def initialize_websocket():
     global ws
-    websocket.enableTrace(True)
+    websocket.enableTrace(False)
     ws = websocket.WebSocketApp(
         'wss://contract.mexc.com/edge',
         on_message=on_message,
@@ -230,15 +256,22 @@ def calculate_indicators(symbol, timeframe):
         # Calculate WaveTrend using the existing method
         wt_results = indicators.indicators.calculate_wave_trend(candles)
         
-        # Debug print
-        # print(f"\nWaveTrend Results for {symbol} {timeframe}:")
-        # print(f"WT1: {wt_results['wt1']:.2f}")
-        # print(f"WT2: {wt_results['wt2']:.2f}")
-        
         # Store results in the latest candle
         if candles:
             candles[0]['wt1'] = wt_results['wt1']
             candles[0]['wt2'] = wt_results['wt2']
+            
+            # Create and broadcast message
+            message = {
+                'symbol': symbol,
+                'timeframe': timeframe,
+                'wt1': round(wt_results['wt1'], 2),
+                'wt2': round(wt_results['wt2'], 2),
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            # Use asyncio to run the broadcast
+            asyncio.run(websocket_server.broadcast(json.dumps(message)))
         
     except Exception as error:
         print(f"Error calculating WaveTrend indicators: {error}")

@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 
 async def connect_websocket():
     """Connect to WebSocket server and print received messages"""
-    uri = "ws://localhost:8765"
+    uri = "ws://localhost:8080"
+    #uri = "wss://your-trading-bot.fly.dev"
     
     try:
         logger.info(f"Attempting to connect to {uri}")

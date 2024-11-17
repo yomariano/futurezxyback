@@ -2,7 +2,6 @@ import asyncio
 import websockets
 import json
 import logging
-import traceback
 from datetime import datetime
 
 # Configure logging
@@ -13,76 +12,60 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 connected_clients = set()
+message_queue = asyncio.Queue()  # Define message queue
+broadcast_lock = asyncio.Lock()  # Add lock for thread safety
+
+async def handle_client(websocket, path):
+    """Handle individual client connections"""
+    try:
+        # Register client
+        connected_clients.add(websocket)
+        logger.info(f"New client connected from {websocket.remote_address}")
+        print(f"👥 Total clients connected: {len(connected_clients)}")
+        try:
+            async for message in websocket:
+                # Process any incoming messages if needed
+                logger.info(f"Received message from client: {message}")
+            
+        except websockets.exceptions.ConnectionClosed:
+            logger.info(f"Client connection closed normally")
+        except Exception as e:
+            logger.error(f"Error handling client message: {str(e)}")
+        finally:
+            connected_clients.remove(websocket)
+            logger.info(f"Client disconnected from {websocket.remote_address}")
+    except Exception as e:
+        logger.error(f"Error in handle_client: {str(e)}")
 
 async def broadcast(message):
+    """Broadcast message to all connected clients"""
     if connected_clients:
-        try:
-            # Log the raw message first
-            logger.info(f"Raw message to broadcast: {message}")
-            
-            # Parse the message if it's a JSON string
-            if isinstance(message, str):
-                try:
-                    message_content = json.loads(message)
-                    logger.info(f"Parsed JSON message: {message_content}")
-                except json.JSONDecodeError as je:
-                    logger.warning(f"Could not parse message as JSON: {je}")
-                    message_content = message
-            else:
-                message_content = message
-            
-            # Log broadcast attempt
-            logger.info(f"Broadcasting to {len(connected_clients)} clients at {datetime.now().isoformat()}")
-            
-            # Broadcast to each client
+        logger.info(f"Broadcasting message to {len(connected_clients)} clients: {message}")
+        print(f"Broadcasting message to {len(connected_clients)} clients: {message}")
+        async with broadcast_lock:
+            disconnected_clients = set()
             for client in connected_clients:
                 try:
                     await client.send(message)
-                    logger.info(f"Successfully sent to client: {client.remote_address}")
+                    logger.info(f"Message sent to client: {message}")
                 except Exception as e:
-                    logger.error(f"Failed to send to client {client.remote_address}: {str(e)}")
-                    logger.error(traceback.format_exc())
+                    logger.error(f"Error sending to client {client.remote_address}: {str(e)}")
+                    disconnected_clients.add(client)
             
-            logger.info("Broadcast completed successfully")
-            
-        except Exception as e:
-            logger.error(f"Error during broadcast operation: {str(e)}")
-            logger.error(traceback.format_exc())
-    else:
-        logger.warning("No connected clients to broadcast to")
+            # Remove disconnected clients
+            for client in disconnected_clients:
+                connected_clients.remove(client)
 
-async def handler(websocket, path):
-    # Register client
-    client_info = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
-    # logger.info(f"New client connected: {client_info}")
-    connected_clients.add(websocket)
-    # logger.info(f"Total connected clients: {len(connected_clients)}")
-    
-    try:
-        # Keep the connection open and handle incoming messages
-        async for message in websocket:
-            logger.info(f"Received message from {client_info}: {message}")
-            
-        # If we get here, the client has closed the connection
-        logger.info(f"Client {client_info} has closed the connection")
-    except websockets.exceptions.ConnectionClosed:
-        logger.info(f"Client {client_info} connection closed unexpectedly")
-    except Exception as e:
-        logger.error(f"Error handling client {client_info}: {str(e)}")
-        logger.error(traceback.format_exc())
-    finally:
-        # Unregister client
-        connected_clients.remove(websocket)
-        logger.info(f"Client disconnected: {client_info}")
-        logger.info(f"Remaining connected clients: {len(connected_clients)}")
-
-async def start_server():
-    try:
-        logger.info("Starting WebSocket server on ws://localhost:8765")
-        server = await websockets.serve(handler, "localhost", 8765)
-        logger.info("WebSocket server is running and ready for connections")
-        await server.wait_closed()
-    except Exception as e:
-        logger.error(f"Error starting WebSocket server: {str(e)}")
-        logger.error(traceback.format_exc())
-        raise
+async def start_server(port=8080, host='0.0.0.0'):
+    """Start the WebSocket server"""
+    server = await websockets.serve(
+        handle_client,
+        host,
+        port,
+        ping_interval=20,  # Add ping interval to keep connections alive
+        ping_timeout=60,
+        max_size=None,
+        compression=None
+    )
+    logger.info(f"WebSocket server is listening on ws://{host}:{port}")
+    return server
