@@ -3,6 +3,7 @@ import websockets
 import json
 import logging
 import sys
+import os
 from datetime import datetime
 
 # Configure logging to stdout
@@ -79,10 +80,14 @@ async def broadcast(message):
         except Exception as e:
             logger.error(f"Broadcast error: {e}")
 
-async def start_server(port=8080, host='0.0.0.0'):
+async def start_server(port=None, host='0.0.0.0'):
     """Start the WebSocket server"""
     global _server_loop
     _server_loop = asyncio.get_running_loop()
+
+    # Use PORT env var (for cloud platforms like Coolify/Railway) or default to 8080
+    if port is None:
+        port = int(os.environ.get('PORT', 8080))
 
     server = await websockets.serve(
         handle_client,
