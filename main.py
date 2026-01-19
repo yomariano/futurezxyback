@@ -51,12 +51,18 @@ class TradingBot:
             
             # Broadcast the WT1 and WT2 values
             try:
+                # Get current price from candle data
+                candles = websocket_client.candle_store[symbol][timeframe]
+                current_price = candles[-1]['close'] if candles else 0
+
                 message = json.dumps({
+                    'type': 'indicators',
                     'symbol': symbol,
                     'timeframe': timeframe,
                     'wt1': round(wt['wt1'], 2),
                     'wt2': round(wt['wt2'], 2),
-                    #'rsi': round(rsi, 2),
+                    'rsi': round(wt.get('rsi', 50), 2),
+                    'price': current_price,
                     'timestamp': datetime.now().isoformat()
                 })
                 print(f"Preparing to broadcast: {message}")
@@ -156,7 +162,11 @@ async def main():
         
         # Start WebSocket server
         websocket_server_task = asyncio.create_task(websocket_server.start_server())
-        
+
+        # Give the server a moment to start before initializing the bot
+        await asyncio.sleep(0.5)
+        print("[MAIN] WebSocket server task created, starting bot initialization...", flush=True)
+
         # Create and initialize trading bot
         bot = TradingBot()
         await bot.initialize()

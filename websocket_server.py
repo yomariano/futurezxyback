@@ -2,70 +2,95 @@ import asyncio
 import websockets
 import json
 import logging
+import sys
 from datetime import datetime
 
-# Configure logging
+# Configure logging to stdout
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
 
 connected_clients = set()
-message_queue = asyncio.Queue()  # Define message queue
-broadcast_lock = asyncio.Lock()  # Add lock for thread safety
+broadcast_lock = asyncio.Lock()
+_server_loop = None
 
-async def handle_client(websocket, path):
+def get_event_loop():
+    """Get the server's event loop for cross-thread calls"""
+    return _server_loop
+
+async def handle_client(websocket):
     """Handle individual client connections"""
+    global _server_loop
+    _server_loop = asyncio.get_running_loop()
+
+    print(f"[WS] handle_client called!", flush=True)
     try:
-        # Register client
         connected_clients.add(websocket)
+        print(f"[WS] New client connected! Total: {len(connected_clients)}", flush=True)
         logger.info(f"New client connected from {websocket.remote_address}")
-        print(f"👥 Total clients connected: {len(connected_clients)}")
+
+        # Send initial connection acknowledgment
+        try:
+            await websocket.send(json.dumps({
+                "type": "connection",
+                "status": "connected",
+                "message": "Welcome to trading signals server"
+            }))
+        except Exception as e:
+            logger.error(f"Error sending welcome message: {e}")
+
         try:
             async for message in websocket:
-                # Process any incoming messages if needed
                 logger.info(f"Received message from client: {message}")
-            
-        except websockets.exceptions.ConnectionClosed:
-            logger.info(f"Client connection closed normally")
+                # Handle subscribe messages
+                try:
+                    data = json.loads(message)
+                    if data.get("type") == "subscribe":
+                        await websocket.send(json.dumps({
+                            "type": "subscribed",
+                            "symbols": data.get("symbols", [])
+                        }))
+                except json.JSONDecodeError:
+                    pass
+        except websockets.exceptions.ConnectionClosed as e:
+            logger.info(f"Client connection closed: {e}")
         except Exception as e:
             logger.error(f"Error handling client message: {str(e)}")
         finally:
-            connected_clients.remove(websocket)
-            logger.info(f"Client disconnected from {websocket.remote_address}")
+            connected_clients.discard(websocket)
+            print(f"[WS] Client disconnected. Total: {len(connected_clients)}", flush=True)
     except Exception as e:
         logger.error(f"Error in handle_client: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 async def broadcast(message):
     """Broadcast message to all connected clients"""
     if connected_clients:
-        logger.info(f"Broadcasting message to {len(connected_clients)} clients: {message}")
-        print(f"Broadcasting message to {len(connected_clients)} clients: {message}")
-        async with broadcast_lock:
-            disconnected_clients = set()
-            for client in connected_clients:
-                try:
-                    await client.send(message)
-                    logger.info(f"Message sent to client: {message}")
-                except Exception as e:
-                    logger.error(f"Error sending to client {client.remote_address}: {str(e)}")
-                    disconnected_clients.add(client)
-            
-            # Remove disconnected clients
-            for client in disconnected_clients:
-                connected_clients.remove(client)
+        # Make a copy to avoid modification during iteration
+        clients = set(connected_clients)
+        logger.info(f"Broadcasting to {len(clients)} clients")
+        try:
+            # Use websockets.broadcast which handles multiple clients efficiently
+            websockets.broadcast(clients, message)
+        except Exception as e:
+            logger.error(f"Broadcast error: {e}")
 
 async def start_server(port=8080, host='0.0.0.0'):
     """Start the WebSocket server"""
+    global _server_loop
+    _server_loop = asyncio.get_running_loop()
+
     server = await websockets.serve(
         handle_client,
         host,
         port,
-        ping_interval=20,  # Add ping interval to keep connections alive
+        ping_interval=20,
         ping_timeout=60,
-        max_size=None,
-        compression=None
     )
     logger.info(f"WebSocket server is listening on ws://{host}:{port}")
-    return server
+    print(f"[WS] WebSocket server started on ws://{host}:{port}", flush=True)
+    await server.wait_closed()

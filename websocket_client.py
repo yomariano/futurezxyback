@@ -8,61 +8,59 @@ import asyncio
 import websocket_server
 # Configuration
 SYMBOLS = [
-'INJ_USDT'
-'BTC_USDT',
-'ETH_USDT',
-'SOL_USDT',
-'XRP_USDT',
-'ADA_USDT',
-'DOT_USDT',
-'AVAX_USDT',
-'DOGE_USDT',
-'LTC_USDT',
-'LINK_USDT',
-'UNI_USDT',
-'BCH_USDT',
-'EOS_USDT',
-'XLM_USDT',
-'TRX_USDT',
-'ETC_USDT',
- 'WLD_USDT',
-'JASMY_USDT',
-'POPCAT_USDT',
- 'HOT_USDT',
-'PEPE_USDT',
-'TOKEN_USDT',
- 'TURBO_USDT',
-'RARE_USDT',
-'CRV_USDT',
-'RENDER_USDT',
-'TAO_USDT',
-'ZEC_USDT',
-'CAT_USDT',
-'CLOUD_USDT',
-"VELO_USDT",
-"LUNA_USDT",
-"TON_USDT",
-"PORTAL_USDT",
-"NOT_USDT",
-"MBL_USDT",
-"CHZ_USDT",
-"XLM_USDT",
-"VANRY_USDT",
-"RUNE_USDT",
-"MEW_USDT",
-"MKR_USDT",
-"SOL_USDT",
-"FET_USDT",
-"HOOK_USDT",
-"XAI_USDT",
-"WIF_USDT",
-"OP_USDT",
-"TIA_USDT",
-"ENA_USDT",
-"WOO_USDT",
-"GALA_USDT",
-"WUSDT",
- "EGLD_USDT"
+    'INJ_USDT',
+    'BTC_USDT',
+    'ETH_USDT',
+    'SOL_USDT',
+    'XRP_USDT',
+    'ADA_USDT',
+    'DOT_USDT',
+    'AVAX_USDT',
+    'DOGE_USDT',
+    'LTC_USDT',
+    'LINK_USDT',
+    'UNI_USDT',
+    'BCH_USDT',
+    'EOS_USDT',
+    'XLM_USDT',
+    'TRX_USDT',
+    'ETC_USDT',
+    'WLD_USDT',
+    'JASMY_USDT',
+    'POPCAT_USDT',
+    'HOT_USDT',
+    'PEPE_USDT',
+    'TOKEN_USDT',
+    'TURBO_USDT',
+    'RARE_USDT',
+    'CRV_USDT',
+    'RENDER_USDT',
+    'TAO_USDT',
+    'ZEC_USDT',
+    'CAT_USDT',
+    'CLOUD_USDT',
+    'VELO_USDT',
+    'LUNA_USDT',
+    'TON_USDT',
+    'PORTAL_USDT',
+    'NOT_USDT',
+    'MBL_USDT',
+    'CHZ_USDT',
+    'VANRY_USDT',
+    'RUNE_USDT',
+    'MEW_USDT',
+    'MKR_USDT',
+    'FET_USDT',
+    'HOOK_USDT',
+    'XAI_USDT',
+    'WIF_USDT',
+    'OP_USDT',
+    'TIA_USDT',
+    'ENA_USDT',
+    'WOO_USDT',
+    'GALA_USDT',
+    'WUSDT',
+    'EGLD_USDT',
 ]
 
 TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h']
@@ -110,7 +108,8 @@ async def fetch_historical_candles(symbol, timeframe):
     
     try:
         #print('Query:', url)
-        response = requests.get(url)
+        # Run synchronous requests.get in a thread to avoid blocking event loop
+        response = await asyncio.to_thread(requests.get, url)
         data = response.json()
         
         # Log the raw response structure
@@ -309,19 +308,19 @@ def calculate_indicators(symbol, timeframe):
     try:
         # Get candles for the symbol and timeframe
         candles = candle_store[symbol][timeframe]
-        
+
         # Calculate WaveTrend
         wt_results = indicators.indicators.calculate_wave_trend(candles)
-        
+
         # Calculate RSI
         rsi_value = indicators.indicators.calculate_rsi(candles)
-        
+
         # Store results in the latest candle
         if candles:
             candles[0]['wt1'] = wt_results['wt1']
             candles[0]['wt2'] = wt_results['wt2']
             candles[0]['rsi'] = float(rsi_value.iloc[-1]) if not rsi_value.empty else None
-            
+
             # Create and broadcast WaveTrend message
             signals = {
                 'type': 'indicators',
@@ -333,9 +332,14 @@ def calculate_indicators(symbol, timeframe):
                 'price': round(float(candles[0]['close']), 4),  # Add current price from latest candle
                 'timestamp': datetime.now().isoformat()
             }
-            
-            # Broadcast both messages separately
-            asyncio.run(websocket_server.broadcast(json.dumps(signals)))
+
+            # Broadcast using the server's event loop (thread-safe)
+            loop = websocket_server.get_event_loop()
+            if loop and loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    websocket_server.broadcast(json.dumps(signals)),
+                    loop
+                )
         
     except Exception as error:
         print(f"Error calculating indicators: {error}")
